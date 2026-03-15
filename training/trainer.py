@@ -355,7 +355,16 @@ class Trainer:
             if lr_schedule == "step":
                 lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [50, 100, 150], gamma=0.5)
             elif lr_schedule == "cosine":
-                lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, self.config["train"]["num_epochs"])
+                warm_up_steps = self.config["train"]["optimizer"].get("warm_up_steps", 0)
+                if warm_up_steps > 0:
+                    def lr_lambda(step):
+                        if step < warm_up_steps:
+                            return float(step) / float(max(1, warm_up_steps))
+                        progress = float(step - warm_up_steps) / float(max(1, num_batches_per_epoch * self.config["train"]["num_epochs"] - warm_up_steps))
+                        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+                    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+                else:
+                    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, self.config["train"]["num_epochs"])
             elif lr_schedule == "cosine_restarts":
                 lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15)
             elif lr_schedule == "loss_tracking":
@@ -383,7 +392,7 @@ class Trainer:
         os.makedirs(self.config["save_dir"], exist_ok=True)
 
         total_step = 0
-        ignore_index = dataset.tokenizer.encode(dataset.tokenizer.pad_token)[0]
+        ignore_index = dataset.tokenizer.pad_token_id
         for epoch in range(start_epoch, self.config["train"]["num_epochs"]):
             # set epoch to use different seeds for different epochs during sampling
             data_sampler.set_epoch(epoch)
@@ -391,7 +400,8 @@ class Trainer:
             metrics_train = {"epoch": epoch}
             accerr_epo = 0  # accumulated error per epoch
 
-            if epoch > 0 and lr_scheduler is not None:
+            is_step_lr_scheduler = isinstance(lr_scheduler, torch.optim.lr_scheduler.LambdaLR)
+            if epoch > 0 and lr_scheduler is not None and not is_step_lr_scheduler:
                 lr_scheduler.step()
                 lr = lr_scheduler.get_last_lr()[0]
             elif lr_scheduler is None:
@@ -421,16 +431,24 @@ class Trainer:
 
                 optimizer.zero_grad()
 
-                grad_scaler.scale(loss).backward()
-                grad_scaler.unscale_(optimizer)  # to use the same max_grad_norm value for gradient clipping
+                if not torch.isfinite(loss):
+                    self.logger.warning("NaN/Inf loss detected, skipping batch")
+                    total_norm, grad_scale = 0.0, 1.0
+                else:
+                    grad_scaler.scale(loss).backward()
+                    grad_scaler.unscale_(optimizer)  # to use the same max_grad_norm value for gradient clipping
 
-                total_norm, grad_scale = grad_norm_tracker.track_and_clip_(list(model.named_parameters()))
-                
-                grad_scaler.step(optimizer)
-                grad_scaler.update()
+                    total_norm, grad_scale = grad_norm_tracker.track_and_clip_(list(model.named_parameters()))
+
+                    grad_scaler.step(optimizer)
+                    grad_scaler.update()
+
+                    if is_step_lr_scheduler:
+                        lr_scheduler.step()
 
                 loss = self.distributed.all_reduce(loss.detach()).item()
-                accerr_epo += loss
+                if torch.isfinite(torch.tensor(loss)):
+                    accerr_epo += loss
 
                 if loss_tracker is not None:
                     loss_tracker.track_loss(loss)
