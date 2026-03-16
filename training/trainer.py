@@ -425,9 +425,10 @@ class Trainer:
                 }
                 input_dict = LazyConversionDict(input_dict, lambda x: x.to(self.device))
                 
-                model_outputs = model(input_dict)
-                logits = model_outputs.logits[:, self.config["model"]["decoder"]["total_prefix_length"] - 1: -1]
-                loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), input_dict['answer']['input_ids'].flatten(), ignore_index=ignore_index)
+                with torch.autocast(device_type=self.device_type, dtype=self.fast_dtype, enabled=self.use_mixed_precision):
+                    model_outputs = model(input_dict)
+                    logits = model_outputs.logits[:, self.config["model"]["decoder"]["total_prefix_length"] - 1: -1]
+                    loss = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), input_dict['answer']['input_ids'].flatten(), ignore_index=ignore_index)
 
                 optimizer.zero_grad()
 
