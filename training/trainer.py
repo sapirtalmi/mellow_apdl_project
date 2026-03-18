@@ -313,17 +313,21 @@ class Trainer:
         # creating dataset
         dataset, data_sampler, data_loader = self.get_data("datafiles")   
         start_epoch = 0
+        resume_checkpoint_data = None
 
         # Construct NN model
         model = self.get_model()
         model = model.to(self.device)
         if self.config["resume_checkpoint"] and self.config["resume_checkpoint"] != "":
-            checkpoint = torch.load(self.config["resume_checkpoint"], map_location=self.device)
-            checkpoint = checkpoint['state_dict']
-            model.load_state_dict(checkpoint, strict=False)
+            resume_checkpoint_data = torch.load(self.config["resume_checkpoint"], map_location=self.device)
+            model.load_state_dict(resume_checkpoint_data['state_dict'], strict=False)
+            if 'epoch' in resume_checkpoint_data:
+                start_epoch = resume_checkpoint_data['epoch'] + 1
 
         model = self.distributed.create_distributed_model(model)
         model.train()
+        if self.config["model"]["encoder"]["freeze_audio_encoder_weights"]:
+            model.module.audio_encoder.base.eval()
 
         if self.distributed.rank() == 0:
             self.logger.info("Mellow has %d parameters of which %d are trainable" % numparams(model))
@@ -373,6 +377,12 @@ class Trainer:
             else:
                 raise ValueError(f"No such lr schedule: {lr_schedule}")
 
+        if resume_checkpoint_data is not None:
+            if 'optimizer' in resume_checkpoint_data:
+                optimizer.load_state_dict(resume_checkpoint_data['optimizer'])
+            if lr_scheduler is not None and 'lr_scheduler' in resume_checkpoint_data:
+                lr_scheduler.load_state_dict(resume_checkpoint_data['lr_scheduler'])
+
         # broadcast optimizer state to all other processes
         self.distributed.broadcast_optimizer_state(optimizer)
         # Train the model
@@ -382,7 +392,7 @@ class Trainer:
         lowest_accerr_epo = 1000.0
         max_grad_norm = self.config["train"]["max_grad_norm"]
         grad_norm_tracker = GradNormTracker(initial_l2_norm=max_grad_norm, initial_max_norm=10 * max_grad_norm)
-    
+
         loss_history = dict(
             loss=[],
             total_grad_norm=[],
@@ -391,7 +401,7 @@ class Trainer:
 
         os.makedirs(self.config["save_dir"], exist_ok=True)
 
-        total_step = 0
+        total_step = resume_checkpoint_data.get('total_step', 0) if resume_checkpoint_data is not None else 0
         ignore_index = dataset.tokenizer.pad_token_id
         for epoch in range(start_epoch, self.config["train"]["num_epochs"]):
             # set epoch to use different seeds for different epochs during sampling
@@ -511,7 +521,7 @@ class Trainer:
                     self.logger.info("Saving model to: %s Total training time: %f hours",
                                         model_fpath, (time.time() - t0) / 3600.0)
 
-                    self._save_model_state(model_fpath, model)
+                    self._save_model_state(model_fpath, model, epoch=epoch, optimizer=optimizer, lr_scheduler=lr_scheduler, total_step=total_step)
                     
             # distributed: broadcast parameters to ensure that models do not diverge
             self.distributed.broadcast_parameters(model.state_dict())
@@ -532,7 +542,7 @@ class Trainer:
         model = self.get_model()
         model = model.to(self.device)
         checkpoint = torch.load(self.config["checkpoint_path"], map_location=self.device)
-        model.load_state_dict(checkpoint, strict=True)
+        model.load_state_dict(checkpoint['state_dict'] if 'state_dict' in checkpoint else checkpoint, strict=True)
         model.eval()
 
         tasks = self.config["data"]["datafiles"]
@@ -605,7 +615,7 @@ class Trainer:
         for e in range(1, max_epochs+1):
             checkpoint_path = self.config["checkpoint_path"].replace("-epo-1",f"-epo-{e}")
             checkpoint = torch.load(checkpoint_path, map_location=self.device)
-            model.load_state_dict(checkpoint, strict=True)
+            model.load_state_dict(checkpoint['state_dict'] if 'state_dict' in checkpoint else checkpoint, strict=True)
             model.eval()
 
             val_score = 0
@@ -665,9 +675,20 @@ class Trainer:
         return f"{prefix}-epo-{epoch + 1}.ckpt"
 
     @retry
-    def _save_model_state(self, model_fpath, model):
+    def _save_model_state(self, model_fpath, model, epoch=None, optimizer=None, lr_scheduler=None, total_step=None):
+        state = {
+            'state_dict': self.distributed.get_distributed_model_state(model),
+        }
+        if epoch is not None:
+            state['epoch'] = epoch
+        if optimizer is not None:
+            state['optimizer'] = optimizer.state_dict()
+        if lr_scheduler is not None:
+            state['lr_scheduler'] = lr_scheduler.state_dict()
+        if total_step is not None:
+            state['total_step'] = total_step
         with open(model_fpath, "wb") as f:
-            torch.save(self.distributed.get_distributed_model_state(model), f)
+            torch.save(state, f)
             # make sure data is sent to blobstorage
             f.flush()
             f.close()
