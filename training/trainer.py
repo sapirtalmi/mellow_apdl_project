@@ -439,13 +439,23 @@ class Trainer:
                     grad_scaler.scale(loss).backward()
                     grad_scaler.unscale_(optimizer)  # to use the same max_grad_norm value for gradient clipping
 
-                    total_norm, grad_scale = grad_norm_tracker.track_and_clip_(list(model.named_parameters()))
+                    has_nan_grad = any(
+                        not torch.isfinite(p.grad).all()
+                        for p in model.parameters() if p.grad is not None
+                    )
+                    if has_nan_grad:
+                        self.logger.warning("NaN/Inf gradient detected, skipping batch")
+                        optimizer.zero_grad()
+                        total_norm, grad_scale = 0.0, 1.0
+                    else:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                        total_norm, grad_scale = grad_norm_tracker.track_and_clip_(list(model.named_parameters()))
 
-                    grad_scaler.step(optimizer)
-                    grad_scaler.update()
+                        grad_scaler.step(optimizer)
+                        grad_scaler.update()
 
-                    if is_step_lr_scheduler:
-                        lr_scheduler.step()
+                        if is_step_lr_scheduler:
+                            lr_scheduler.step()
 
                 loss = self.distributed.all_reduce(loss.detach()).item()
                 if torch.isfinite(torch.tensor(loss)):
