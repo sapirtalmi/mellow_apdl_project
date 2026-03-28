@@ -434,7 +434,24 @@ class Trainer:
                     "answer":batch_answer,
                 }
                 input_dict = LazyConversionDict(input_dict, lambda x: x.to(self.device))
-                
+
+                # Skip batches with corrupted audio before the forward pass.
+                # NaN/Inf waveforms cause NaN activations inside the frozen HTSAT encoder.
+                # Extreme-magnitude waveforms (finite but very large) can cause logit overflow
+                # and NaN gradients in backward even when the forward loss is finite.
+                MAX_AUDIO_ABS = 100.0
+                audio_ok = torch.tensor(
+                    1.0 if (torch.isfinite(input_dict['audio1']).all() and
+                            torch.isfinite(input_dict['audio2']).all() and
+                            input_dict['audio1'].abs().max() < MAX_AUDIO_ABS and
+                            input_dict['audio2'].abs().max() < MAX_AUDIO_ABS) else 0.0,
+                    device=self.device
+                )
+                self.distributed.all_reduce(audio_ok, average=False)  # sum; < world_size means some rank has bad audio
+                if audio_ok.item() < self.distributed.world_size() - 0.5:
+                    self.logger.warning("NaN/Inf or extreme-magnitude audio detected, skipping batch")
+                    continue
+
                 with torch.autocast(device_type=self.device_type, dtype=self.fast_dtype, enabled=self.use_mixed_precision):
                     model_outputs = model(input_dict)
                     logits = model_outputs.logits[:, self.config["model"]["decoder"]["total_prefix_length"] - 1: -1]
@@ -442,30 +459,37 @@ class Trainer:
 
                 optimizer.zero_grad()
 
-                if not torch.isfinite(loss):
-                    self.logger.warning("NaN/Inf loss detected, skipping batch")
+                # Always call backward so DDP gradient sync runs on all ranks.
+                # Skipping backward on some ranks but not others deadlocks NCCL AllReduce.
+                grad_scaler.scale(loss).backward()
+                grad_scaler.unscale_(optimizer)
+
+                # Check this rank's values, then sync the skip decision across all ranks.
+                # If ANY rank has bad values, ALL ranks skip the optimizer step.
+                has_bad = not torch.isfinite(loss) or any(
+                    not torch.isfinite(p.grad).all()
+                    for p in model.parameters() if p.grad is not None
+                )
+                skip_step = torch.tensor(1.0 if has_bad else 0.0, device=self.device)
+                self.distributed.all_reduce(skip_step)  # avg > 0 means some rank has bad values
+                if skip_step.item() > 0:
+                    if has_bad and self.distributed.rank() == 0:
+                        self.logger.warning("NaN/Inf loss or gradient detected, skipping optimizer step")
+                        for name, p in model.named_parameters():
+                            if p.grad is not None and not torch.isfinite(p.grad).all():
+                                self.logger.warning(f"  First bad gradient in: {name}")
+                                break
+                    optimizer.zero_grad()
                     total_norm, grad_scale = 0.0, 1.0
                 else:
-                    grad_scaler.scale(loss).backward()
-                    grad_scaler.unscale_(optimizer)  # to use the same max_grad_norm value for gradient clipping
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                    total_norm, grad_scale = grad_norm_tracker.track_and_clip_(list(model.named_parameters()))
 
-                    has_nan_grad = any(
-                        not torch.isfinite(p.grad).all()
-                        for p in model.parameters() if p.grad is not None
-                    )
-                    if has_nan_grad:
-                        self.logger.warning("NaN/Inf gradient detected, skipping batch")
-                        optimizer.zero_grad()
-                        total_norm, grad_scale = 0.0, 1.0
-                    else:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-                        total_norm, grad_scale = grad_norm_tracker.track_and_clip_(list(model.named_parameters()))
+                    grad_scaler.step(optimizer)
+                    grad_scaler.update()
 
-                        grad_scaler.step(optimizer)
-                        grad_scaler.update()
-
-                        if is_step_lr_scheduler:
-                            lr_scheduler.step()
+                    if is_step_lr_scheduler:
+                        lr_scheduler.step()
 
                 loss = self.distributed.all_reduce(loss.detach()).item()
                 if torch.isfinite(torch.tensor(loss)):

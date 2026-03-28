@@ -155,8 +155,8 @@ class TorchDistributedContext(IDistributedContext):
         # Set find_unused_parameters=False for better performance
         # Only set to True if your model has control flow that leads to unused parameters
         model = nn.parallel.DistributedDataParallel(
-            model, 
-            find_unused_parameters=False
+            model,
+            find_unused_parameters=True
         )
         self.broadcast_parameters(model.state_dict())
         return model

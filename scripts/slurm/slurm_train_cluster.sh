@@ -21,6 +21,8 @@ export TRANSFORMERS_CACHE=$HF_HOME
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29500
 
+export NCCL_DEBUG=WARN
+
 echo "=== SLURM Job Info ==="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURMD_NODENAME"
