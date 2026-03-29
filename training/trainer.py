@@ -319,10 +319,19 @@ class Trainer:
         model = self.get_model()
         model = model.to(self.device)
         if self.config["resume_checkpoint"] and self.config["resume_checkpoint"] != "":
-            resume_checkpoint_data = torch.load(self.config["resume_checkpoint"], map_location=self.device)
-            model.load_state_dict(resume_checkpoint_data['state_dict'], strict=False)
-            if 'epoch' in resume_checkpoint_data:
-                start_epoch = resume_checkpoint_data['epoch'] + 1
+            # Only rank 0 loads the checkpoint from disk to avoid N simultaneous
+            # NFS reads (N × checkpoint_size) that can cause NCCL timeout.
+            # DDP init inside create_distributed_model broadcasts rank 0's
+            # parameters to all other ranks automatically.
+            if self.distributed.rank() == 0:
+                resume_checkpoint_data = torch.load(self.config["resume_checkpoint"], map_location=self.device)
+                model.load_state_dict(resume_checkpoint_data['state_dict'], strict=False)
+                if 'epoch' in resume_checkpoint_data:
+                    start_epoch = resume_checkpoint_data['epoch'] + 1
+            # Broadcast start_epoch from rank 0 to all ranks
+            start_epoch_tensor = torch.tensor(start_epoch, dtype=torch.long, device=self.device)
+            self.distributed.broadcast(start_epoch_tensor)
+            start_epoch = int(start_epoch_tensor.item())
 
         model = self.distributed.create_distributed_model(model)
         model.train()
@@ -379,12 +388,30 @@ class Trainer:
 
         if resume_checkpoint_data is not None:
             if 'optimizer' in resume_checkpoint_data:
-                optimizer.load_state_dict(resume_checkpoint_data['optimizer'])
+                try:
+                    optimizer.load_state_dict(resume_checkpoint_data['optimizer'])
+                except ValueError as e:
+                    self.logger.warning(f"Could not load optimizer state (parameter groups changed, e.g. layers frozen/unfrozen): {e}. Starting optimizer from scratch.")
             if lr_scheduler is not None and 'lr_scheduler' in resume_checkpoint_data:
                 lr_scheduler.load_state_dict(resume_checkpoint_data['lr_scheduler'])
 
-        # broadcast optimizer state to all other processes
+        # broadcast optimizer state (Adam m/v tensors) to all other processes
         self.distributed.broadcast_optimizer_state(optimizer)
+        # broadcast_optimizer_state only syncs Adam tensors, not param_groups (LR)
+        # or lr_scheduler internal state. Sync those explicitly from rank 0.
+        if self.config["resume_checkpoint"] and self.config["resume_checkpoint"] != "":
+            lr_tensor = torch.tensor(optimizer.param_groups[0]['lr'], device=self.device)
+            self.distributed.broadcast(lr_tensor)
+            for pg in optimizer.param_groups:
+                pg['lr'] = lr_tensor.item()
+            if lr_scheduler is not None:
+                sched_t = torch.tensor(
+                    [lr_scheduler.last_epoch, lr_scheduler._step_count],
+                    dtype=torch.long, device=self.device
+                )
+                self.distributed.broadcast(sched_t)
+                lr_scheduler.last_epoch = int(sched_t[0].item())
+                lr_scheduler._step_count = int(sched_t[1].item())
         # Train the model
         num_batches_per_epoch = len(data_loader)
 
@@ -439,7 +466,7 @@ class Trainer:
                 # NaN/Inf waveforms cause NaN activations inside the frozen HTSAT encoder.
                 # Extreme-magnitude waveforms (finite but very large) can cause logit overflow
                 # and NaN gradients in backward even when the forward loss is finite.
-                MAX_AUDIO_ABS = 100.0
+                MAX_AUDIO_ABS = 1.5
                 audio_ok = torch.tensor(
                     1.0 if (torch.isfinite(input_dict['audio1']).all() and
                             torch.isfinite(input_dict['audio2']).all() and

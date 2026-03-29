@@ -90,16 +90,16 @@ class AudioEncoder(nn.Module):
         self.projection = Projection(pretrained_emb_size if use_pretrained_audioencoder else d_in, d_out)
 
         if freeze_audio_encoder_weights:
-            if audioenc_name == 'HTSAT':
-                for p in self.base.htsat.parameters():
-                    p.requires_grad = False
-            elif audioenc_name == 'Cnn14':
-                for p in self.base.cnn14.parameters():
-                    p.requires_grad = False
+            # Freeze all of self.base (backbone + c2l projection) so that c2l
+            # weight gradients cannot overflow and corrupt training.
+            # The downstream self.projection layer remains trainable.
+            for p in self.base.parameters():
+                p.requires_grad = False
 
     def forward(self, x):
         out_dict = self.base(x)
         audio_features, audio_classification_output = out_dict['embedding'], out_dict['clipwise_output']
+        audio_features = torch.nan_to_num(audio_features, nan=0.0, posinf=0.0, neginf=0.0)
         projected_vec = self.projection(audio_features)
         return projected_vec, audio_classification_output, out_dict
 
