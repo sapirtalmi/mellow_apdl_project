@@ -319,19 +319,31 @@ class Trainer:
         model = self.get_model()
         model = model.to(self.device)
         if self.config["resume_checkpoint"] and self.config["resume_checkpoint"] != "":
-            # Only rank 0 loads the checkpoint from disk to avoid N simultaneous
-            # NFS reads (N × checkpoint_size) that can cause NCCL timeout.
-            # DDP init inside create_distributed_model broadcasts rank 0's
-            # parameters to all other ranks automatically.
+            # Rank 0 copies checkpoint to /dev/shm (RAM disk) so all ranks load from fast
+            # local storage. Previously all ranks loaded from NFS simultaneously (4×1.7 GB
+            # competing reads), which caused NCCL watchdog timeout on slow NFS days.
+            # broadcast_optimizer_state requires all ranks to have optimizer state loaded
+            # (same tensor count); so all ranks load the checkpoint, but only rank 0 applies
+            # model weights (DDP broadcast_parameters below syncs them to other ranks).
+            import shutil as _shutil
+            nfs_ckpt = self.config["resume_checkpoint"]
+            local_ckpt = "/dev/shm/mellow_resume.ckpt"
             if self.distributed.rank() == 0:
-                resume_checkpoint_data = torch.load(self.config["resume_checkpoint"], map_location=self.device)
+                _shutil.copy2(nfs_ckpt, local_ckpt)
+                self.logger.info("Checkpoint copied to %s", local_ckpt)
+            self.distributed.barrier()
+            resume_checkpoint_data = torch.load(local_ckpt, map_location=self.device)
+            if self.distributed.rank() == 0:
                 model.load_state_dict(resume_checkpoint_data['state_dict'], strict=False)
-                if 'epoch' in resume_checkpoint_data:
-                    start_epoch = resume_checkpoint_data['epoch'] + 1
-            # Broadcast start_epoch from rank 0 to all ranks
-            start_epoch_tensor = torch.tensor(start_epoch, dtype=torch.long, device=self.device)
-            self.distributed.broadcast(start_epoch_tensor)
-            start_epoch = int(start_epoch_tensor.item())
+                # Projection LayerNorm gamma grew to ~6x during epochs 1-3 (should be ~1.0).
+                # Large gamma → prefix embeddings of magnitude ~6 → NaN in SmolLM2 backward.
+                # Reset to 1.0; the lower LR (5e-5) will prevent rapid regrowth.
+                with torch.no_grad():
+                    model.audio_encoder.projection.layer_norm.weight.fill_(1.0)
+                    model.audio_encoder.projection.layer_norm.bias.fill_(0.0)
+                self.logger.warning("Reset projection.layer_norm gamma to 1.0 (was ~6.2)")
+            if 'epoch' in resume_checkpoint_data:
+                start_epoch = resume_checkpoint_data['epoch'] + 1
 
         model = self.distributed.create_distributed_model(model)
         model.train()
@@ -436,6 +448,7 @@ class Trainer:
             tqdm_handler = tqdm(total=num_batches_per_epoch, position=0)
             metrics_train = {"epoch": epoch}
             accerr_epo = 0  # accumulated error per epoch
+            skipped_steps_epo = 0  # steps skipped due to NaN/Inf gradients
 
             is_step_lr_scheduler = isinstance(lr_scheduler, torch.optim.lr_scheduler.LambdaLR)
             if epoch > 0 and lr_scheduler is not None and not is_step_lr_scheduler:
@@ -491,30 +504,33 @@ class Trainer:
                 grad_scaler.scale(loss).backward()
                 grad_scaler.unscale_(optimizer)
 
-                # Check this rank's values, then sync the skip decision across all ranks.
-                # If ANY rank has bad values, ALL ranks skip the optimizer step.
-                has_bad = not torch.isfinite(loss) or any(
-                    not torch.isfinite(p.grad).all()
-                    for p in model.parameters() if p.grad is not None
-                )
-                skip_step = torch.tensor(1.0 if has_bad else 0.0, device=self.device)
-                self.distributed.all_reduce(skip_step)  # avg > 0 means some rank has bad values
-                if skip_step.item() > 0:
-                    if has_bad and self.distributed.rank() == 0:
-                        self.logger.warning("NaN/Inf loss or gradient detected, skipping optimizer step")
-                        for name, p in model.named_parameters():
-                            if p.grad is not None and not torch.isfinite(p.grad).all():
-                                self.logger.warning(f"  First bad gradient in: {name}")
-                                break
+                # If loss is NaN/Inf on any rank: skip the step (bad data or catastrophic state).
+                # If loss is finite but some gradients are NaN (projection overflow into
+                # SmolLM2 backward): zero out NaN grads and proceed — partial updates beat
+                # skipping 100% of steps (old logic had 99% skip rate).
+                loss_bad = torch.tensor(0.0 if torch.isfinite(loss) else 1.0, device=self.device)
+                self.distributed.all_reduce(loss_bad, average=False)
+                if loss_bad.item() > 0.5:
+                    skipped_steps_epo += 1
+                    if self.distributed.rank() == 0:
+                        self.logger.warning("NaN/Inf loss detected, skipping optimizer step")
                     optimizer.zero_grad()
                     total_norm, grad_scale = 0.0, 1.0
                 else:
+                    # Zero out any NaN/Inf gradients before clipping and stepping
+                    first_nan_name = None
+                    for name, p in model.named_parameters():
+                        if p.grad is not None and not torch.isfinite(p.grad).all():
+                            p.grad = torch.nan_to_num(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
+                            if first_nan_name is None:
+                                first_nan_name = name
+                    if first_nan_name is not None and self.distributed.rank() == 0:
+                        self.logger.warning("NaN/Inf gradient zeroed in: %s (proceeding with update)", first_nan_name)
+
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                     total_norm, grad_scale = grad_norm_tracker.track_and_clip_(list(model.named_parameters()))
-
                     grad_scaler.step(optimizer)
                     grad_scaler.update()
-
                     if is_step_lr_scheduler:
                         lr_scheduler.step()
 
@@ -540,10 +556,11 @@ class Trainer:
                     errstr = ", ".join(
                         "{}: {:6.3f}(e-6)".format(k, v * 1e6) for k, v in errdict.items()
                     )
+                    skip_rate = skipped_steps_epo / (ii + 1)
                     self.logger.info(
-                        "Epoch [%3d/%3d], Step [%3d/%3d], %s",
+                        "Epoch [%3d/%3d], Step [%3d/%3d], %s, skip_rate: %.1f%%",
                         epoch + 1, self.config["train"]["num_epochs"], ii + 1,
-                        num_batches_per_epoch, errstr
+                        num_batches_per_epoch, errstr, skip_rate * 100
                     )
                     tqdm_handler.update(1)
 
@@ -607,6 +624,7 @@ class Trainer:
             num_batches_per_epoch = len(data_loader)
             tqdm_handler = tqdm(total=num_batches_per_epoch, position=0)
 
+            debug_samples = self.config.get("debug_samples", None)
             generations, answers, filepaths, inputs = [], [], [], []
             with torch.no_grad():
                 for batch_data_dict in tqdm(data_loader):
@@ -625,21 +643,34 @@ class Trainer:
                         "answer":batch_answer,
                     }
                     input_dict = LazyConversionDict(input_dict, lambda x: x.to(self.device))
-                
+
                     prefix, _, _ = model.generate_prefix_inference(input_dict)
                     generated_text = generate_greedy_batch(model, data_loader.dataset.tokenizer, embed=prefix)
                     generations += generated_text
+                    print(f"generated_text {generated_text}")
                     answers += batch_answer_text
                     inputs += batch_input_text
                     filepaths += batch_file_paths
-                    #break
+                    if debug_samples is not None and len(generations) >= debug_samples:
+                        break
+
+            if self.distributed.rank() == 0:
+                taskname = task.split(os.path.sep)[-1].split(".json")[0]
+                samples_dir = os.path.join(self.config["save_dir"], f"{taskname}_outputs")
+                os.makedirs(samples_dir, exist_ok=True)
+                for i, (fp, inp, gen, ans) in enumerate(zip(filepaths, inputs, generations, answers)):
+                    sample_name = os.path.splitext(os.path.basename(fp))[0]
+                    sample_path = os.path.join(samples_dir, f"{i:04d}_{sample_name}.json")
+                    with open(sample_path, "w") as f:
+                        json.dump({"filepath": fp, "input": inp, "generated": gen, "answer": ans}, f, indent=2)
+                self.logger.info("Saved %d sample outputs to %s", len(generations), samples_dir)
 
             metric.get_metrics(generations, answers, filepaths)
             if self.distributed.rank() == 0:
                 self.logger.info("Task %s results", task)
                 for key in metric.metrics.keys():
                     self.logger.info("%s: %f", key, metric.metrics[key]["score"])
-            
+
             # azure logging
             val_score += metric.metrics["main"]["score"]
             taskname = task.split(os.path.sep)[-1].split(".json")[0]

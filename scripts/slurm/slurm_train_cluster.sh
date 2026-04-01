@@ -33,6 +33,10 @@ echo "======================"
 
 cd $PROJECT_DIR
 
+# Checkpoint path is set in config/train_cluster.yaml (resume_checkpoint field).
+# trainer.py handles the checkpoint copy: rank 0 copies to /dev/shm (RAM disk),
+# barrier, then all ranks load from /dev/shm — no NFS contention.
+
 $PYTHON -m torch.distributed.run \
     --nnodes=1 \
     --nproc_per_node=4 \

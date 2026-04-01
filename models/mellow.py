@@ -101,6 +101,13 @@ class AudioEncoder(nn.Module):
         audio_features, audio_classification_output = out_dict['embedding'], out_dict['clipwise_output']
         audio_features = torch.nan_to_num(audio_features, nan=0.0, posinf=0.0, neginf=0.0)
         projected_vec = self.projection(audio_features)
+        # Clamp projection output to prevent large-magnitude embeddings from
+        # overflowing SmolLM2's attention logits during backward pass.
+        proj_max = projected_vec.abs().max().item()
+        if proj_max > 2.0:
+            import logging
+            logging.getLogger(__name__).warning(f"Projection output max abs = {proj_max:.2f}, clamping to [-2, 2]")
+        projected_vec = torch.clamp(projected_vec, -2.0, 2.0)
         return projected_vec, audio_classification_output, out_dict
 
 class Mellow(nn.Module):

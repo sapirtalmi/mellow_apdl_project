@@ -106,7 +106,8 @@ def generate_greedy(
 
                 indices_to_remove = sorted_indices[sorted_indices_to_remove]
                 logits[:, indices_to_remove] = filter_value
-                next_token = torch.argmax(logits, -1).unsqueeze(0)
+                probs = F.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
                 next_token_embed = model.caption_decoder.lm.transformer.wte(next_token)
                 if tokens is None:
                     tokens = next_token
@@ -174,7 +175,8 @@ def generate_greedy_batch(
                 indices_to_remove = sorted_indices[k][sorted_indices_to_remove[k]]
                 logits[k, indices_to_remove] = filter_value
 
-            next_token = torch.argmax(logits, -1).unsqueeze(1)
+            probs = F.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
 
             if "gpt2" in model.caption_decoder.text_decoder:
                next_token_embed = model.caption_decoder.lm.transformer.wte(next_token)
