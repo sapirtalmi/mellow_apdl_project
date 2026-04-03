@@ -39,7 +39,7 @@ model:
 train:
     optimizer:
         optimizer_type: Adam
-        learning_rate: 1e-3
+        learning_rate: 1e-4
         warm_up_steps: 10000
         reduce_lr_steps: 1000000
         weight_decay: 0.0001
@@ -53,7 +53,7 @@ train:
     sync_batchnorm: True
     batch_size: 2
     num_epochs: 10
-    log_step: 1
+    log_step: 10
     sav_per_num_epochs: 1
     random_seed: 1234
     mixed_precision:

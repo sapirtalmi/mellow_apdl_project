@@ -62,7 +62,7 @@ train:
     num_epochs: 10
     log_step: 1
     sav_per_num_epochs: 1
-    random_seed: 1234
+    random_seed: 1234F
     mixed_precision: 
         use_mixed_precision: False
         mixed_precision_dtype: "float16"  # or "bfloat16"

@@ -1,7 +1,7 @@
 ---
 mode: 'train'
 gpu: True
-resume_checkpoint: ""
+resume_checkpoint: "/home/yandex/APDL2526a/sapirtalmi/mellow_apdl_project/outputs/2026-03-31_10-38-33/model--epo-7.ckpt"
 
 data:
     datapath: '/home/yandex/APDL2526a/idantarshish/mellow_apdl_project/data'
@@ -38,7 +38,7 @@ model:
 train:
     optimizer:
         optimizer_type: Adam
-        learning_rate: 1e-4
+        learning_rate: 5e-5
         warm_up_steps: 10000
         reduce_lr_steps: 1000000
         weight_decay: 0.0001
@@ -46,11 +46,11 @@ train:
     max_grad_norm: 0.5
     emergency_stop_grad_norm: 1e6
     num_nodes: 1
-    num_workers: 4
+    num_workers: 2
     persistent_data_workers: True
     loss_type: sisdr_wav
     sync_batchnorm: False
-    batch_size: 4
+    batch_size: 2
     num_epochs: 10
     log_step: 100
     sav_per_num_epochs: 1
