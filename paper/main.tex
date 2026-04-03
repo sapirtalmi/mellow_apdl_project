@@ -1,0 +1,101 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{mellow}
+\citation{drossos2020clotho}
+\citation{gong2023ltu,tang2024salmonn}
+\citation{deshmukh2023pengi}
+\citation{mellow}
+\citation{deshmukh2025adiff}
+\citation{drossos2020clotho}
+\citation{drossos2020clotho}
+\citation{kim2019audiocaps}
+\citation{mellow}
+\citation{deshmukh2023pengi}
+\citation{gong2023ltu}
+\citation{tang2024salmonn}
+\citation{mellow}
+\citation{chen2022hts}
+\citation{smollm2}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{I}{1}{Introduction}{section.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{1}{section.2}\protected@file@percent }
+\newlabel{sec:related}{{II}{1}{Related Work}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-A}}Audio Captioning and Datasets}{1}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-B}}Audio Language Models}{1}{subsection.2.2}\protected@file@percent }
+\citation{mellow}
+\citation{mellow}
+\citation{papineni2002bleu}
+\citation{banerjee2005meteor}
+\citation{vedantam2015cider}
+\citation{anderson2016spice}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-C}}Mellow}{2}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {III}Method}{2}{section.3}\protected@file@percent }
+\newlabel{sec:method}{{III}{2}{Method}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}Task Reformulation}{2}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-B}}Architecture}{2}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-C}}Training Configuration}{2}{subsection.3.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Mellow architecture (reproduced from \cite  {mellow}): two audio streams are independently encoded by HTSAT and mapped into the LM embedding space, then concatenated with the text prompt embedding to form a prefix for SmolLM2-135M. The mapper detail (centre) shows the linear alignment and $8\times $ downsample steps; the projection detail (right) shows the two-layer MLP with GeLU, dropout, residual add, and LayerNorm.}}{2}{figure.1}\protected@file@percent }
+\newlabel{fig:arch}{{1}{2}{Mellow architecture (reproduced from \cite {mellow}): two audio streams are independently encoded by HTSAT and mapped into the LM embedding space, then concatenated with the text prompt embedding to form a prefix for SmolLM2-135M. The mapper detail (centre) shows the linear alignment and $8\times $ downsample steps; the projection detail (right) shows the two-layer MLP with GeLU, dropout, residual add, and LayerNorm}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Three example audio pairs from the Clotho validation set. Each row shows the log-mel spectrograms of Audio~1 (left) and Audio~2 (right), with the model's generated comparative description below. The spectrograms visualize frequency content over time ($x$-axis: time in seconds, $y$-axis: mel-scaled frequency, color: energy in dB).}}{2}{figure.2}\protected@file@percent }
+\newlabel{fig:spectrograms}{{2}{2}{Three example audio pairs from the Clotho validation set. Each row shows the log-mel spectrograms of Audio~1 (left) and Audio~2 (right), with the model's generated comparative description below. The spectrograms visualize frequency content over time ($x$-axis: time in seconds, $y$-axis: mel-scaled frequency, color: energy in dB)}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-D}}Evaluation Metrics}{2}{subsection.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Engineering Challenges}{2}{section.4}\protected@file@percent }
+\newlabel{sec:challenges}{{IV}{2}{Engineering Challenges}{section.4}{}}
+\citation{mellow}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Final training configuration.}}{3}{table.1}\protected@file@percent }
+\newlabel{tab:config}{{I}{3}{Final training configuration}{table.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Clean vs.\ out-of-distribution Clotho audio. Top row: waveforms showing normal amplitude in $[-1,1]$ (left) vs.\ amplitude $\approx $80 (right). Bottom row: corresponding log-mel spectrograms. The OOD spectrogram is saturated, causing log-mel overflow and NaN gradients inside HTSAT.}}{3}{figure.3}\protected@file@percent }
+\newlabel{fig:waveforms}{{3}{3}{Clean vs.\ out-of-distribution Clotho audio. Top row: waveforms showing normal amplitude in $[-1,1]$ (left) vs.\ amplitude $\approx $80 (right). Bottom row: corresponding log-mel spectrograms. The OOD spectrogram is saturated, causing log-mel overflow and NaN gradients inside HTSAT}{figure.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Spectral properties of clean vs.\ out-of-distribution audio. OOD files have RMS energy $\approx $80$\times $ higher than clean files, causing log-mel spectrogram overflow and NaN gradients inside HTSAT. The pre-forward amplitude guard (reject if $\max |x| \geq 1.5$) filters these files before they reach the encoder.}}{3}{figure.4}\protected@file@percent }
+\newlabel{fig:freqanalysis}{{4}{3}{Spectral properties of clean vs.\ out-of-distribution audio. OOD files have RMS energy $\approx $80$\times $ higher than clean files, causing log-mel spectrogram overflow and NaN gradients inside HTSAT. The pre-forward amplitude guard (reject if $\max |x| \geq 1.5$) filters these files before they reach the encoder}{figure.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces LayerNorm scale drift. Left: $\gamma $ growing from 1.0 to 6.2 over 3 epochs. Right: projection output range at different $\gamma $ values, with the $\pm 2$ clamp boundary marked. The large $\gamma $ at checkpoint resume caused 99\% batch skip rate.}}{3}{figure.5}\protected@file@percent }
+\newlabel{fig:gamma}{{5}{3}{LayerNorm scale drift. Left: $\gamma $ growing from 1.0 to 6.2 over 3 epochs. Right: projection output range at different $\gamma $ values, with the $\pm 2$ clamp boundary marked. The large $\gamma $ at checkpoint resume caused 99\% batch skip rate}{figure.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {V}Results}{3}{section.5}\protected@file@percent }
+\newlabel{sec:results}{{V}{3}{Results}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Training Loss}{3}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Quantitative Results}{3}{subsection.5.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Captioning metrics on the Clotho validation set.}}{3}{table.2}\protected@file@percent }
+\newlabel{tab:results}{{II}{3}{Captioning metrics on the Clotho validation set}{table.2}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Batch skip rate at each debugging stage. Red bars indicate broken states (100\% and 99\% skip rates), orange indicates degraded operation (63\%, 5\%), and green indicates stable training (0\%).}}{4}{figure.6}\protected@file@percent }
+\newlabel{fig:skiprate}{{6}{4}{Batch skip rate at each debugging stage. Red bars indicate broken states (100\% and 99\% skip rates), orange indicates degraded operation (63\%, 5\%), and green indicates stable training (0\%)}{figure.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Training loss. Left: loss per epoch over all 10 epochs; the dip at epoch 4 marks the restart after the frozen-layer bug was fixed. Right: zoom into the first 500 steps of epoch 4, showing loss dropping from $\approx $6.2 to $\approx $4.9, confirming that the fixes took effect immediately.}}{4}{figure.7}\protected@file@percent }
+\newlabel{fig:loss}{{7}{4}{Training loss. Left: loss per epoch over all 10 epochs; the dip at epoch 4 marks the restart after the frozen-layer bug was fixed. Right: zoom into the first 500 steps of epoch 4, showing loss dropping from $\approx $6.2 to $\approx $4.9, confirming that the fixes took effect immediately}{figure.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Qualitative Results}{4}{subsection.5.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Representative generated outputs at epoch 10.}}{4}{table.3}\protected@file@percent }
+\newlabel{tab:qualitative}{{III}{4}{Representative generated outputs at epoch 10}{table.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion}{4}{section.6}\protected@file@percent }
+\newlabel{sec:discussion}{{VI}{4}{Discussion}{section.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Representative generated outputs from the epoch-10 checkpoint on the Clotho validation set. Green: fluent and grounded outputs. Orange: partial failures — format bias (outputs starting with ``b)/c)'') or hallucinated DSP jargon. Red: incomplete outputs (``The audio~''). The model has learned audio vocabulary and comparative structure but lacks consistent grounding to the actual audio content.}}{4}{figure.8}\protected@file@percent }
+\newlabel{fig:qualitative}{{8}{4}{Representative generated outputs from the epoch-10 checkpoint on the Clotho validation set. Green: fluent and grounded outputs. Orange: partial failures — format bias (outputs starting with ``b)/c)'') or hallucinated DSP jargon. Red: incomplete outputs (``The audio~''). The model has learned audio vocabulary and comparative structure but lacks consistent grounding to the actual audio content}{figure.8}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Top-30 word frequency comparison between model outputs and reference captions (102,841 tokens from 20,000 evaluation samples). Seventeen of the top-20 words are shared, indicating successful domain-level vocabulary adaptation. The model's failures are therefore not lexical but structural: it generates plausible word combinations that lack coherent grounding to the actual audio input.}}{4}{figure.9}\protected@file@percent }
+\newlabel{fig:wordcloud}{{9}{4}{Top-30 word frequency comparison between model outputs and reference captions (102,841 tokens from 20,000 evaluation samples). Seventeen of the top-20 words are shared, indicating successful domain-level vocabulary adaptation. The model's failures are therefore not lexical but structural: it generates plausible word combinations that lack coherent grounding to the actual audio input}{figure.9}{}}
+\citation{dubey2024llama}
+\citation{deshmukh2025adiff}
+\bibstyle{IEEEtran}
+\bibdata{references}
+\bibcite{mellow}{1}
+\bibcite{drossos2020clotho}{2}
+\bibcite{gong2023ltu}{3}
+\bibcite{tang2024salmonn}{4}
+\bibcite{deshmukh2023pengi}{5}
+\bibcite{deshmukh2025adiff}{6}
+\bibcite{kim2019audiocaps}{7}
+\bibcite{chen2022hts}{8}
+\bibcite{smollm2}{9}
+\bibcite{papineni2002bleu}{10}
+\bibcite{banerjee2005meteor}{11}
+\bibcite{vedantam2015cider}{12}
+\bibcite{anderson2016spice}{13}
+\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces Distribution of generated output lengths at epoch 10. Left: histogram showing a bimodal distribution — a peak at very short outputs (1--3 words: ``yes'', ``The audio~'') and a broader peak at 10--25 words. Right: CDF showing that approximately X\% of outputs are $\leq $5 words, indicating the model frequently produces incomplete responses.}}{5}{figure.10}\protected@file@percent }
+\newlabel{fig:lengths}{{10}{5}{Distribution of generated output lengths at epoch 10. Left: histogram showing a bimodal distribution — a peak at very short outputs (1--3 words: ``yes'', ``The audio~'') and a broader peak at 10--25 words. Right: CDF showing that approximately X\% of outputs are $\leq $5 words, indicating the model frequently produces incomplete responses}{figure.10}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Future Work}{5}{section.7}\protected@file@percent }
+\newlabel{sec:future}{{VII}{5}{Future Work}{section.7}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Limitations and Broader Impact}{5}{section.8}\protected@file@percent }
+\newlabel{sec:limitations}{{VIII}{5}{Limitations and Broader Impact}{section.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {IX}Conclusion}{5}{section.9}\protected@file@percent }
+\newlabel{sec:conclusion}{{IX}{5}{Conclusion}{section.9}{}}
+\@writefile{toc}{\contentsline {section}{References}{5}{section*.1}\protected@file@percent }
+\bibcite{dubey2024llama}{14}
+\gdef \@abspage@last{6}
