@@ -197,8 +197,13 @@ print(f"\nRunning inference...")
 results = []
 
 for i, pair in enumerate(sample_pairs):
-    fp1 = os.path.join(DATA_ROOT, pair['filepath1'].replace('/', os.sep))
-    fp2 = os.path.join(DATA_ROOT, pair['filepath2'].replace('/', os.sep))
+    rel1 = pair.get('filepath1', '').replace('\\', '/')
+    rel2 = pair.get('filepath2', '').replace('\\', '/')
+    if not rel1 or not rel2:
+        continue
+
+    fp1 = os.path.join(DATA_ROOT, rel1)
+    fp2 = os.path.join(DATA_ROOT, rel2)
 
     if not os.path.exists(fp1) or not os.path.exists(fp2):
         continue
