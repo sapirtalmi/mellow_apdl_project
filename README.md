@@ -3,13 +3,6 @@
 **Advanced Topics in Audio Processing using Deep Learning — Final Project**
 Tel Aviv University, School of Computer Science
 
-| Name | ID |
-|------|----|
-| Gal Aharoni | 203521984 |
-| Ori Baron | 215889510 |
-| Sapir Talmi | 318900875 |
-| Idan Tarshish | 314634981 |
-
 ---
 
 ## Overview
