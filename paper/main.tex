@@ -81,9 +81,9 @@ In this work, we reimplement Mellow and train it on the Clotho portion of Reason
 \label{sec:method}
 % =============================================================================
 
-\subsection{Task Reformulation}
+\subsection{Training Data}
 
-Since we were limited to Clotho V2.1, we use the Clotho-only portion of ReasonAQA, spanning six subtypes: Clotho-MCQ (95,551), Clotho-Detail (94,838), CLD audio difference (57,585), Clotho captioning (19,195), ClothoAQA (14,088), and CLE entailment (11,511) — totalling 292,768 training examples across 5,014 clips ($\sim$80,000 validation examples). Each example is a tuple $(a_i, a_j, q) \to t$, where $a_i$, $a_j$ are audio clips (identical for single-clip tasks), $q$ is the task question, and $t$ is the target answer. For captioning, $a_i = a_j$ and $t$ is one of five Clotho reference captions sampled uniformly per epoch.
+Since we were limited to Clotho V2.1, we use the Clotho-only portion of ReasonAQA, spanning six subtypes: Clotho-MCQ (95,551), Clotho-Detail (94,838), CLD audio difference (57,585), Clotho captioning (19,195), ClothoAQA (14,088), and CLE entailment (11,511) — totalling 292,768 training examples across 5,014 clips ($\sim$80,000 validation examples). Each example is a tuple $(a_i, a_j, q) \to t$, where $a_i$, $a_j$ are audio clips, $q$ is the task question, and $t$ is the target answer. For captioning, $a_j$ is a randomly sampled clip from the dataset (not $a_i$), the prompt instructs the model to caption only $a_i$, and $t$ is one of five Clotho reference captions for $a_i$, sampled uniformly per epoch.
 
 \subsection{Architecture}
 
@@ -267,7 +267,7 @@ Incoherent jargon  & ``high-8 khz. the listener. The loudness and animal sounds 
 \end{table}
 
 \subsection{Encoder Representation Quality}
-To determine whether weak CIDEr reflects encoder failure or LM failure, we extracted HTSAT embeddings for $\sim$1,390 Clotho validation clips and visualised them with t-SNE and UMAP (Figure~\ref{fig:tsne}). Both methods show semantically meaningful clusters — animal sounds tightly separated from vehicles; human voice and music broader but coherent — without any encoder fine-tuning. This localises the performance bottleneck to the \emph{cross-modal projection and language model}, not the audio encoder. The encoder functions correctly; grounding between audio tokens and text generation is where the system fails.
+To determine whether weak CIDEr reflects encoder failure or LM failure, we extracted HTSAT embeddings for $\sim$1,390 Clotho validation clips and visualised them with t-SNE and UMAP (Figure~\ref{fig:tsne}). Both methods show semantically meaningful clusters — animal sounds tightly separated from vehicles; human voice and music broader but coherent — without any encoder fine-tuning. This confirms that the frozen encoder produces semantically meaningful representations; the performance gap therefore lies in the cross-modal projection and language model, not in audio understanding.
 
 \begin{figure}[t]
     \centering
@@ -294,12 +294,7 @@ In contrast, the well-calibrated original Mellow model gains little from increas
 \label{sec:future}
 % =============================================================================
 
-\textbf{LLM-generated contrastive targets.} While the CLD subset provides genuinely contrastive targets, the majority of our training pairs use simple caption concatenations. Instead, one could prompt an LLM (e.g., LLaMA 3~\cite{dubey2024llama}) with
-both captions to generate a sentence that explicitly describes the difference (e.g., ``the
-first clip features outdoor wind, while the second features indoor machine noise''). This
-approach is used in the CLD dataset~\cite{deshmukh2025adiff}. The model would be trained on
-genuinely contrastive targets rather than independent descriptions, encouraging stronger
-grounding. Trade-off: LLM inference over 293k pairs costs $\sim$1--2 GPU-days, and
+\textbf{LLM-generated contrastive targets.} While the CLD subset provides genuinely contrastive targets, the remaining subtypes (Clotho-Detail, Clotho-MCQ) do not explicitly describe audio differences. One could prompt an LLM (e.g., LLaMA 3~\cite{dubey2024llama}) with both captions to generate a sentence that explicitly describes the difference (e.g., ``the first clip features outdoor wind, while the second features indoor machine noise''). This approach is used in the CLD dataset~\cite{deshmukh2025adiff}. The model would be trained on genuinely contrastive targets, encouraging stronger grounding. Trade-off: LLM inference over 293k pairs costs $\sim$1--2 GPU-days, and
 hallucinations in generated answers would inject noise into the training set.
 
 \textbf{Rebalancing the training mixture.} The current mix ($\sim$95k MC-style,
@@ -324,12 +319,11 @@ vs.\ QA would allow each task to specialise its output format without contaminat
 % =============================================================================
 
 \textbf{Limitations.}
-(1)~Our model is not evaluated on the full ReasonAQA benchmark (MMAU, Audio Entailment,
-Audio Difference) because those tasks require AudioCaps, which was not available to us.
+(1)~Our model is not evaluated on the full ReasonAQA test set (Audio Entailment, Audio Difference) or on the separate MMAU benchmark, as these require AudioCaps, which was not available to us.
 Our results are therefore not directly comparable to the original Mellow paper.
 (2)~Clotho covers general environmental sounds; our model has no exposure to speech or music
 content. This limits its applicability to non-speech, non-music scenarios.
-(3)~Most pairwise training targets are only weakly contrastive (concatenated captions), limiting the model's ability to perform true comparative audio reasoning at inference time.
+(3)~Most training subtypes (Clotho-Detail, Clotho-MCQ) do not provide explicitly contrastive targets, limiting the model's ability to perform true comparative audio reasoning at inference time.
 
 \textbf{Broader impact.}
 Small audio language models like Mellow have positive applications in accessibility (e.g.,
@@ -344,18 +338,8 @@ high-stakes settings requires careful evaluation for hallucination and bias.
 \label{sec:conclusion}
 % =============================================================================
 
-We have adapted Mellow's dual-stream audio reasoning architecture to Clotho V2.1, training on
-pairwise comparison and captioning tasks with Clotho-only data. After resolving a series of
-distributed training and gradient stability failures, the model trained stably for 10 epochs
-and achieves CIDEr$=0.027$, BLEU-1$=0.052$, ROUGE-L$=0.086$ on the mixed validation set
-(best captioning checkpoint: epoch~9, CIDEr$=0.015$).
-t-SNE analysis of HTSAT embeddings reveals that the audio encoder produces semantically
-meaningful representations — animal, vehicle, and human voice clusters are well-separated —
-localising the performance gap to the cross-modal projection and language model rather than
-to audio understanding. The primary failure modes are MC-format contamination from training
-data imbalance and weak grounding caused by concatenative rather than contrastive training
-targets. Addressing these through training mixture rebalancing and LLM-generated contrastive
-targets are the most promising directions for future work.
+We reimplement Mellow and train it on six task subtypes from the Clotho portion of ReasonAQA (MCQ, detail captioning, audio difference, entailment, QA, and captioning) with Clotho-only data. After resolving a series of distributed training and gradient stability failures, the model trained stably for 10 epochs and achieves CIDEr$=0.027$, BLEU-1$=0.052$, ROUGE-L$=0.086$ on the mixed validation set (best captioning checkpoint: epoch~9, CIDEr$=0.015$).
+t-SNE analysis of HTSAT embeddings confirms that the frozen audio encoder produces semantically meaningful representations — animal, vehicle, and human voice clusters are well-separated — while the performance gap lies in the cross-modal projection and language model. The primary failure modes are MC-format contamination from training data imbalance and weak cross-modal grounding from the absence of explicitly contrastive training targets in the majority of task subtypes. Addressing these through training mixture rebalancing and LLM-generated contrastive targets are the most promising directions for future work.
 
 
 \bibliographystyle{IEEEtran}
@@ -381,7 +365,7 @@ targets are the most promising directions for future work.
                            & 0.5            & 44\%    & 66.55\% \\ \midrule
         \multirow{3}{*}{5} & 1.0            & 33.75\% & 65.5\% \\
                            & 0.7            & 42.25\% & 66.3\% \\
-                           & 0.5            & \textbf{46.85\%}     & \textbf{66.75\%} \\ \bottomrule
+                           & 0.5            & \textbf{46.85\%}     & 66.75\% \\ \bottomrule
     \end{tabular}
     \begin{tablenotes}
       \small
