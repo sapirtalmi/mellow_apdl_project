@@ -1,16 +1,16 @@
-mode: 'train'
+---
+mode: 'evaluate_checkpoint'
 gpu: True
 resume_checkpoint: ""
+debug_samples: null
+checkpoint_path: ''  # set by script
 
 data:
     datapath: '/home/yandex/APDL2526a/idantarshish/mellow_apdl_project/data'
     datafiles:
-        - '/home/yandex/APDL2526a/sapirtalmi/mellow_apdl_project/datafiles/train_clotho.json'
-    val_datafiles:
-        - '/home/yandex/APDL2526a/sapirtalmi/mellow_apdl_project/datafiles/val_clotho.json'
+        - '/home/yandex/APDL2526a/sapirtalmi/mellow_apdl_project/datafiles/val_captioning_500.json'
     sampling_rate: 32000
     segment_seconds: 10
-    # tokenizer_type: "gpt2"
     tokenizer_type: "HuggingFaceTB/SmolLM2-135M"
     op_text_len: 250
     ip_text_len: 129
@@ -26,9 +26,8 @@ model:
         pretrained_audioencoder_path: '/home/yandex/APDL2526a/sapirtalmi/mellow_apdl_project/htsat'
     decoder:
       text_decoder: "HuggingFaceTB/SmolLM2-135M"
-    #   text_decoder: "gpt2"
       prefix_length: 40
-      total_prefix_length: 389 # 129 (audio 1 shape) + 129 (audio 2 shape) + 129 (input len shape) + 2 (sep token shape)
+      total_prefix_length: 389
       freeze_gpt_weights: False
     model_type: Mellow
     input_channels: 1
@@ -44,16 +43,16 @@ train:
         reduce_lr_steps: 1000000
         weight_decay: 0.0001
         scheduler: "cosine"
-    max_grad_norm: 0.5 
+    max_grad_norm: 0.5
     emergency_stop_grad_norm: 1e6
     num_nodes: 1
-    num_workers: 4
+    num_workers: 0
     persistent_data_workers: True
     loss_type: sisdr_wav
-    sync_batchnorm: True
-    batch_size: 2
-    num_epochs: 10
-    log_step: 10
+    sync_batchnorm: False
+    batch_size: 4
+    num_epochs: 1
+    log_step: 1
     sav_per_num_epochs: 1
     random_seed: 1234
     mixed_precision:
